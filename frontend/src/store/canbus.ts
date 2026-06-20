@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { CanFrame, DbcMessage, BusStats } from '../types';
+import type { CanFrame, DbcMessage, BusStats, TrafficTrendPoint } from '../types';
 import { parseDbc, decodeCanFrame, DEFAULT_DBC_CONTENT } from '../utils/dbc-parser';
 
 let frameIdCounter = 0;
@@ -13,6 +13,7 @@ export const useCanBusStore = defineStore('canbus', () => {
   const filterText = ref('');
   const isCapturing = ref(false);
   const pollInterval = ref<number | null>(null);
+  const trendInterval = ref<number | null>(null);
 
   const busStats = ref<BusStats>({
     totalFrames: 0,
@@ -22,6 +23,11 @@ export const useCanBusStore = defineStore('canbus', () => {
     busLoad: 0,
     lastUpdate: Date.now()
   });
+
+  const trafficTrend = ref<TrafficTrendPoint[]>([]);
+  const TREND_MAX_POINTS = 60;
+  const windowRx = ref(0);
+  const windowTx = ref(0);
 
   const filteredFrames = computed(() => {
     let result = frames.value;
@@ -52,6 +58,40 @@ export const useCanBusStore = defineStore('canbus', () => {
     return busStats.value.busLoad.toFixed(1);
   });
 
+  const rxTxRatio = computed(() => {
+    const tx = busStats.value.txCount;
+    const rx = busStats.value.rxCount;
+    if (tx === 0 && rx === 0) return 0;
+    if (tx === 0) return 99.99;
+    return +(rx / tx).toFixed(2);
+  });
+
+  const trafficImbalanceStatus = computed(() => {
+    const total = busStats.value.rxCount + busStats.value.txCount;
+    if (total < 20) return { level: 'normal' as const, label: '数据不足', text: 'gray-400' };
+    const ratio = rxTxRatio.value;
+    if (ratio > 5 || (ratio > 0 && ratio < 0.2)) {
+      return { level: 'severe' as const, label: '严重失衡', text: 'red-400' };
+    } else if (ratio > 3 || (ratio > 0 && ratio < 0.33)) {
+      return { level: 'warning' as const, label: '轻度失衡', text: 'yellow-400' };
+    }
+    return { level: 'normal' as const, label: '正常', text: 'green-400' };
+  });
+
+  function snapshotTrafficWindow() {
+    const point: TrafficTrendPoint = {
+      time: Date.now(),
+      rx: windowRx.value,
+      tx: windowTx.value
+    };
+    trafficTrend.value.push(point);
+    if (trafficTrend.value.length > TREND_MAX_POINTS) {
+      trafficTrend.value = trafficTrend.value.slice(-TREND_MAX_POINTS);
+    }
+    windowRx.value = 0;
+    windowTx.value = 0;
+  }
+
   function addFrame(frame: CanFrame) {
     frames.value.push(frame);
     if (frames.value.length > 500) {
@@ -59,8 +99,13 @@ export const useCanBusStore = defineStore('canbus', () => {
     }
 
     busStats.value.totalFrames++;
-    if (frame.direction === 'RX') busStats.value.rxCount++;
-    else busStats.value.txCount++;
+    if (frame.direction === 'RX') {
+      busStats.value.rxCount++;
+      windowRx.value++;
+    } else {
+      busStats.value.txCount++;
+      windowTx.value++;
+    }
     busStats.value.lastUpdate = Date.now();
 
     // Update signal history
@@ -87,6 +132,9 @@ export const useCanBusStore = defineStore('canbus', () => {
   function clearFrames() {
     frames.value = [];
     signals.value = new Map();
+    trafficTrend.value = [];
+    windowRx.value = 0;
+    windowTx.value = 0;
     busStats.value = {
       totalFrames: 0,
       rxCount: 0,
@@ -160,7 +208,6 @@ export const useCanBusStore = defineStore('canbus', () => {
     if (isCapturing.value) return;
     isCapturing.value = true;
 
-    // Load mock DBC if not loaded
     if (dbcMessages.value.size === 0) {
       loadMockDbc();
     }
@@ -169,6 +216,10 @@ export const useCanBusStore = defineStore('canbus', () => {
       const frame = generateMockFrame();
       addFrame(frame);
     }, 200);
+
+    trendInterval.value = window.setInterval(() => {
+      snapshotTrafficWindow();
+    }, 1000);
   }
 
   function stopCapture() {
@@ -176,6 +227,13 @@ export const useCanBusStore = defineStore('canbus', () => {
     if (pollInterval.value !== null) {
       clearInterval(pollInterval.value);
       pollInterval.value = null;
+    }
+    if (trendInterval.value !== null) {
+      clearInterval(trendInterval.value);
+      trendInterval.value = null;
+    }
+    if (windowRx.value > 0 || windowTx.value > 0) {
+      snapshotTrafficWindow();
     }
   }
 
@@ -204,8 +262,11 @@ export const useCanBusStore = defineStore('canbus', () => {
     filterText,
     busStats,
     isCapturing,
+    trafficTrend,
     filteredFrames,
     busLoadPercent,
+    rxTxRatio,
+    trafficImbalanceStatus,
     addFrame,
     clearFrames,
     loadMockDbc,

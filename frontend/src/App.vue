@@ -2,6 +2,7 @@
 import { useCanBusStore } from './store/canbus';
 import FrameTable from './components/FrameTable.vue';
 import SignalChart from './components/SignalChart.vue';
+import TrafficTrendChart from './components/TrafficTrendChart.vue';
 
 const store = useCanBusStore();
 
@@ -73,9 +74,14 @@ function handleExport() {
         <FrameTable />
       </div>
 
-      <!-- Right Panel: Signal Chart (40%) -->
+      <!-- Right Panel: Charts (40%) -->
       <div class="w-2/5 flex flex-col overflow-hidden">
-        <SignalChart />
+        <div class="h-1/2 border-b border-gray-700 relative overflow-hidden">
+          <TrafficTrendChart />
+        </div>
+        <div class="h-1/2 relative overflow-hidden">
+          <SignalChart />
+        </div>
       </div>
     </main>
 
@@ -88,12 +94,19 @@ function handleExport() {
           </span>
         </span>
         <span>DBC消息: {{ store.dbcMessages.size }}</span>
+        <span>
+          通信状态:
+          <span :class="`text-${store.trafficImbalanceStatus.text} font-bold ml-1`">
+            {{ store.trafficImbalanceStatus.label }}
+          </span>
+        </span>
       </div>
       <div class="flex items-center gap-4 text-gray-500">
-        <span>帧数: {{ store.busStats.totalFrames }}</span>
-        <span>RX: {{ store.busStats.rxCount }}</span>
-        <span>TX: {{ store.busStats.txCount }}</span>
-        <span>负载: {{ store.busLoadPercent }}%</span>
+        <span>帧数: <span class="text-cyan-400 font-bold">{{ store.busStats.totalFrames }}</span></span>
+        <span>RX: <span class="text-green-400 font-bold">{{ store.busStats.rxCount }}</span></span>
+        <span>TX: <span class="text-blue-400 font-bold">{{ store.busStats.txCount }}</span></span>
+        <span>RX/TX: <span class="text-yellow-400 font-bold">{{ store.rxTxRatio === 99.99 ? '∞' : store.rxTxRatio }}</span></span>
+        <span>负载: <span class="text-yellow-400 font-bold">{{ store.busLoadPercent }}%</span></span>
       </div>
     </footer>
   </div>

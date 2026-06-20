@@ -36,3 +36,9 @@ export interface BusStats {
   busLoad: number;
   lastUpdate: number;
 }
+
+export interface TrafficTrendPoint {
+  time: number;
+  rx: number;
+  tx: number;
+}

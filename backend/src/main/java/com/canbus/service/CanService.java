@@ -9,8 +9,13 @@ import java.util.*;
 public class CanService {
 
     private static final int[] MESSAGE_IDS = {0x7DF, 0x7E8, 0x7E9, 0x7EA, 0x7EB};
+    private static final int TREND_MAX_POINTS = 60;
     private final Random random = new Random();
     private int frameCounter = 0;
+
+    private final Deque<Map<String, Object>> trafficTrendHistory = new LinkedList<>();
+    private int windowRxCount = 0;
+    private int windowTxCount = 0;
 
     /**
      * Generate 20 mock OBD-II CAN frames with realistic values
@@ -18,9 +23,32 @@ public class CanService {
     public List<CanFrame> generateMockFrames() {
         List<CanFrame> frames = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
-            frames.add(generateSingleFrame());
+            CanFrame frame = generateSingleFrame();
+            if ("RX".equals(frame.getDirection())) {
+                windowRxCount++;
+            } else {
+                windowTxCount++;
+            }
+            frames.add(frame);
         }
         return frames;
+    }
+
+    public void snapshotTrafficWindow() {
+        Map<String, Object> point = new LinkedHashMap<>();
+        point.put("time", System.currentTimeMillis());
+        point.put("rx", windowRxCount);
+        point.put("tx", windowTxCount);
+        trafficTrendHistory.offerLast(point);
+        while (trafficTrendHistory.size() > TREND_MAX_POINTS) {
+            trafficTrendHistory.pollFirst();
+        }
+        windowRxCount = 0;
+        windowTxCount = 0;
+    }
+
+    public List<Map<String, Object>> getTrafficTrend() {
+        return new ArrayList<>(trafficTrendHistory);
     }
 
     private CanFrame generateSingleFrame() {
@@ -121,12 +149,44 @@ public class CanService {
      */
     public Map<String, Object> getStats(int totalFrames) {
         Map<String, Object> stats = new LinkedHashMap<>();
+        int rxCount = (int) (totalFrames * 0.7);
+        int txCount = totalFrames - rxCount;
         stats.put("totalFrames", totalFrames);
-        stats.put("rxCount", (int) (totalFrames * 0.7));
-        stats.put("txCount", (int) (totalFrames * 0.3));
+        stats.put("rxCount", rxCount);
+        stats.put("txCount", txCount);
         stats.put("errorCount", 0);
         stats.put("busLoad", 15 + random.nextDouble() * 30);
         stats.put("lastUpdate", System.currentTimeMillis());
+
+        double rxTxRatio;
+        if (txCount == 0 && rxCount == 0) {
+            rxTxRatio = 0;
+        } else if (txCount == 0) {
+            rxTxRatio = 9999.0;
+        } else {
+            rxTxRatio = Math.round((double) rxCount / txCount * 100.0) / 100.0;
+        }
+        stats.put("rxTxRatio", rxTxRatio);
+
+        String imbalanceLevel;
+        String imbalanceLabel;
+        if (totalFrames < 20) {
+            imbalanceLevel = "normal";
+            imbalanceLabel = "数据不足";
+        } else if (rxTxRatio > 5 || (rxTxRatio > 0 && rxTxRatio < 0.2)) {
+            imbalanceLevel = "severe";
+            imbalanceLabel = "严重失衡";
+        } else if (rxTxRatio > 3 || (rxTxRatio > 0 && rxTxRatio < 0.33)) {
+            imbalanceLevel = "warning";
+            imbalanceLabel = "轻度失衡";
+        } else {
+            imbalanceLevel = "normal";
+            imbalanceLabel = "正常";
+        }
+        stats.put("imbalanceLevel", imbalanceLevel);
+        stats.put("imbalanceLabel", imbalanceLabel);
+
+        stats.put("trafficTrend", getTrafficTrend());
         return stats;
     }
 }
